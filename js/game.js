@@ -343,9 +343,16 @@
       S.launcher.u += (du / n) * MOVE_SPEED * dt;
       S.launcher.v += (dv / n) * MOVE_SPEED * dt;
     }
-    if (keys.has('ArrowLeft')) S.launcher.theta -= TURN_SPEED * dt;
-    if (keys.has('ArrowRight')) S.launcher.theta += TURN_SPEED * dt;
-    if (keys.has('ArrowUp') || keys.has('ArrowDown')) levelLauncher();
+    // 矢印キー: 光軸を横切る向きのキーで旋回、光軸に沿う向きのキーで平行に戻す。
+    // 横モード(光軸が左右)は ↑/↓ で旋回・←/→ で平行、縦モード(光軸が上下)は ←/→ で旋回・↑/↓ で平行。
+    // 旋回はキーの矢印の向きにビームが振れる(横の ↑ と縦の ← はどちらも θ を減らす)
+    const land = S.mode === 'landscape';
+    const turnMinus = land ? 'ArrowUp' : 'ArrowLeft';
+    const turnPlus = land ? 'ArrowDown' : 'ArrowRight';
+    const lv = land ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown'];
+    if (keys.has(turnMinus)) S.launcher.theta -= TURN_SPEED * dt;
+    if (keys.has(turnPlus)) S.launcher.theta += TURN_SPEED * dt;
+    if (keys.has(lv[0]) || keys.has(lv[1])) levelLauncher();
     clampLauncher();
 
     // 発射とエネルギーゲージ
