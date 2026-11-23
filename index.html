@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>レンズ・シューター</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="hud">
+    <div class="hud-item" id="hud-time-box"><span class="hud-label">残り時間</span><span id="hud-time" class="hud-value">60.0</span></div>
+    <div class="hud-item" id="hud-score-box"><span class="hud-label">得点</span><span id="hud-score" class="hud-value">0</span></div>
+    <div class="hud-item"><span class="hud-label">狙い時間</span><span id="hud-aim" class="hud-value">0.0</span></div>
+    <div class="hud-item" id="hud-energy-box">
+      <span class="hud-label">エネルギー</span>
+      <div id="energy-bar"><div id="energy-fill"></div></div>
+    </div>
+    <div class="hud-item" id="hud-f-box" hidden>
+      <label class="hud-label" for="f-slider">焦点距離</label>
+      <input id="f-slider" type="range" min="200" max="480" step="10" value="320">
+    </div>
+    <div class="hud-buttons">
+      <button id="btn-quit" class="hud-btn" hidden>やめる</button>
+      <button id="btn-sound" class="hud-btn" title="効果音のオン/オフ">音:オン</button>
+      <button id="btn-rotate" class="hud-btn" title="縦モード/横モードの切り替え(R キー)">↻ 縦/横</button>
+    </div>
+  </header>
+
+  <main id="stage">
+    <canvas id="game"></canvas>
+    <button id="btn-fire" aria-label="発射">発射</button>
+    <button id="btn-level" title="向きを光軸と平行に戻す(↑/↓ キー)">平行に<br>戻す</button>
+
+    <section id="overlay-title" class="overlay">
+      <div class="panel">
+        <h1>レンズ・シューター</h1>
+        <p>発射台を動かしたり回したりしながら、ビームを<strong>凸レンズに通して</strong>的に当てよう。<br>
+          早く当てるほど高得点。制限時間は60秒。</p>
+        <ul class="howto">
+          <li><b>動かす</b>:発射台をドラッグ(W/A/S/D)</li>
+          <li><b>回す</b>:発射台の先の丸いハンドルをドラッグ(←/→)。「平行に戻す」ボタン(↑/↓)で光軸と平行に戻る</li>
+          <li><b>発射</b>:「発射」ボタンを押している間(スペースキー)</li>
+        </ul>
+        <p class="hint">ヒント:光軸に平行な光・レンズの中心を通る光・焦点を通る光には決まった進み方があるよ。</p>
+        <div class="buttons">
+          <button id="btn-start" class="big">スタート</button>
+          <button id="btn-practice" class="big secondary">練習モード</button>
+        </div>
+        <p class="highscore">ハイスコア:<span id="title-high">0</span> 点</p>
+      </div>
+    </section>
+
+    <section id="overlay-result" class="overlay" hidden>
+      <div class="panel">
+        <h2>結果</h2>
+        <p class="result-score"><span id="res-score">0</span> 点 <span id="res-new" hidden>ハイスコア更新!</span></p>
+        <table class="result-table">
+          <tr><th>命中数</th><td id="res-hits">0</td></tr>
+          <tr><th>最速命中</th><td id="res-best">-</td></tr>
+          <tr><th>平行な光で命中</th><td id="res-parallel">0</td></tr>
+          <tr><th>中心を通る光で命中</th><td id="res-center">0</td></tr>
+          <tr><th>焦点を通る光で命中</th><td id="res-focus">0</td></tr>
+        </table>
+        <p class="hint">後ろの線は、命中したビームの道筋だよ。</p>
+        <div class="buttons">
+          <button id="btn-retry" class="big">もう一度</button>
+          <button id="btn-title" class="big secondary">タイトルへ</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="rotate-fade"></div>
+  </main>
+
+  <script src="js/optics.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
