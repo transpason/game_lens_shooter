@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright (C) 2026 transpason — 無保証。詳細は LICENSE を参照。 */
+
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 
@@ -117,6 +120,8 @@ button.big {
 button.big.secondary { background: #3c4d72; }
 button.big:hover { filter: brightness(1.15); }
 .highscore { margin-bottom: 0; color: #ffd36b; }
+.legal { margin: 14px 0 0; font-size: 12px; line-height: 1.6; color: #8899b8; }
+.legal a { color: #9fc8ff; }
 .result-score { font-size: 40px; font-weight: 800; margin: 4px 0 8px; color: #ffd36b; }
 #res-new { font-size: 18px; color: #ff8a5c; margin-left: 8px; }
 .result-table { margin: 0 auto; border-collapse: collapse; font-size: 16px; }

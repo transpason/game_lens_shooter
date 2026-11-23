@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 transpason
+// このプログラムはフリーソフトウェアです。GNU一般公衆利用許諾書(GPL)バージョン3または
+// それ以降のバージョンの条件で再配布・改変できます。無保証です。詳細は LICENSE を参照。
 // 実行: node --test tests/
 const test = require('node:test');
 const assert = require('node:assert/strict');
