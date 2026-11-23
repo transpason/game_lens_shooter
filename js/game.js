@@ -17,7 +17,15 @@
   const GHOST_TIME = 1.0;         // ボタンを離した後に道筋が残る時間
   const ROTATE_PAUSE = 0.5;       // 縦横切り替え中はタイマーを止める
   const MSG_TIME = 1.6;
-  const HANDLE_DIST = 80;         // 発射台中心から回転ハンドルまで
+  const BODY_GRAB_PX = 34;        // 発射台本体をつかめる半径(画面上の最低値。これより外のドラッグは旋回)
+  const BODY_MIN_W_PX = 44;       // スマホでも指で押さえやすい発射台の大きさ(画面上の最低値)
+  const BODY_MIN_H_PX = 24;
+  const DRAG_TURN_PER_PX = 0.25 * DEG; // 空き場所ドラッグ: 指を1px動かすと回る角度(100pxで25度)
+  const TURN_BTN_START = 6 * DEG;  // 旋回ボタン: 押し始めの速さ(細かく合わせられる)
+  const TURN_BTN_ACCEL = 40 * DEG; // 押し続けると1秒あたりこれだけ速くなる(最大 TURN_SPEED)
+  const TURN_BTN_NUDGE = 0.5 * DEG; // 軽く1回押したときに回る量
+  const RESERVE_RIGHT = 132;      // 横モード: 右側の操作ボタン列の幅(px)
+  const RESERVE_BOTTOM = 104;     // 縦モード: 下側の操作ボタン行の高さ(px)
   const MOVE_SPEED = 500;         // キー操作の移動速度(座標/秒)
   const TURN_SPEED = 80 * DEG;    // キー操作の回転速度(ラジアン/秒)
 
@@ -40,6 +48,7 @@
     fBox: $('hud-f-box'), fSlider: $('f-slider'),
     quit: $('btn-quit'), sound: $('btn-sound'), rotate: $('btn-rotate'),
     fire: $('btn-fire'),
+    turnL: $('btn-turn-l'), turnR: $('btn-turn-r'),
     level: $('btn-level'),
     title: $('overlay-title'), result: $('overlay-result'),
     titleHigh: $('title-high'),
@@ -68,6 +77,7 @@
     f: W.F_DEFAULT,
     target: null,
     fireInputs: new Set(),
+    turnInputs: new Map(),     // pointerId → { dir: -1 | 1, t: 押している時間 }
     firing: false,
     trace: null,
     energy: 1,
@@ -165,8 +175,15 @@
     const sw = S.mode === 'landscape' ? W.W : W.H;
     const sh = S.mode === 'landscape' ? W.H : W.W;
     const pad = 8;
-    const s = Math.min((r.width - pad * 2) / sw, (r.height - pad * 2) / sh);
-    view = { s, ox: (r.width - sw * s) / 2, oy: (r.height - sh * s) / 2, cw: r.width, ch: r.height, dpr };
+    // 操作ボタンの場所(横モードは右の列、縦モードは下の行)を空けて、遊ぶ範囲を置く
+    const rw = S.mode === 'landscape' ? RESERVE_RIGHT : 0;
+    const rb = S.mode === 'portrait' ? RESERVE_BOTTOM : 0;
+    const aw = r.width - rw - pad * 2;
+    const ah = r.height - rb - pad * 2;
+    const s = Math.min(aw / sw, ah / sh);
+    view = { s, ox: pad + (aw - sw * s) / 2, oy: pad + (ah - sh * s) / 2, cw: r.width, ch: r.height, dpr };
+    el.stage.classList.toggle('landscape', S.mode === 'landscape');
+    el.stage.classList.toggle('portrait', S.mode === 'portrait');
     keepTargetClear();
   }
 
@@ -187,6 +204,9 @@
     return S.mode === 'landscape' ? [du, dv] : [dv, -du];
   }
 
+  // 発射台をつかめる範囲(画面上で小さくなりすぎないよう px の最低値を持つ)
+  function bodyGrab() { return Math.max(64, BODY_GRAB_PX / view.s); }
+
   // ---------- ゲーム進行 ----------
   function clampLauncher() {
     const L = S.launcher;
@@ -205,7 +225,7 @@
     const cr = canvas.getBoundingClientRect();
     const [x, y] = toScreen(t.u, t.v);
     const clear = t.r * view.s + 16; // 的の半径 + 余白(px)
-    for (const b of [el.fire, el.level]) {
+    for (const b of [el.fire, el.level, el.turnL, el.turnR]) {
       const r = b.getBoundingClientRect();
       if (r.width === 0) continue;
       const bx = r.left - cr.left, by = r.top - cr.top;
@@ -257,6 +277,7 @@
   function endRound() {
     S.screen = 'result';
     S.fireInputs.clear();
+    S.turnInputs.clear();
     S.firing = false;
     Sound.setHum(false);
     Sound.end();
@@ -276,6 +297,7 @@
   function toTitle() {
     S.screen = 'title';
     S.fireInputs.clear();
+    S.turnInputs.clear();
     Sound.setHum(false);
     el.result.hidden = true;
     el.title.hidden = false;
@@ -357,6 +379,12 @@
     if (keys.has(turnMinus)) S.launcher.theta -= TURN_SPEED * dt;
     if (keys.has(turnPlus)) S.launcher.theta += TURN_SPEED * dt;
     if (keys.has(lv[0]) || keys.has(lv[1])) levelLauncher();
+    // 旋回ボタン: 押し始めはゆっくり、押し続けるほど速く回る
+    for (const ti of S.turnInputs.values()) {
+      ti.t += dt;
+      const speed = Math.min(TURN_SPEED, TURN_BTN_START + TURN_BTN_ACCEL * ti.t);
+      S.launcher.theta += ti.dir * speed * dt;
+    }
     clampLauncher();
 
     // 発射とエネルギーゲージ
@@ -613,26 +641,31 @@
       ctx.save();
       ctx.translate(lx, ly);
       ctx.rotate(ang);
-      ctx.strokeStyle = 'rgba(79, 163, 255, 0.6)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(30 * s, 0);
-      ctx.lineTo(HANDLE_DIST * s, 0);
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(79, 163, 255, 0.25)';
+      const dragKinds = [...drags.values()].map((d) => d.kind);
+      const moving = dragKinds.includes('move');
+      const turning = dragKinds.includes('turn') || S.turnInputs.size > 0;
+      const bw = Math.max(64 * s, BODY_MIN_W_PX), bh = Math.max(34 * s, BODY_MIN_H_PX);
+      ctx.fillStyle = moving ? 'rgba(79, 163, 255, 0.55)' : 'rgba(79, 163, 255, 0.25)';
       ctx.strokeStyle = C.launcher;
-      ctx.lineWidth = 2.5;
-      const bw = 64 * s, bh = 34 * s;
+      ctx.lineWidth = moving ? 3.5 : 2.5;
       ctx.beginPath();
-      ctx.roundRect(-bw / 2, -bh / 2, bw, bh, 6 * s);
+      ctx.roundRect(-bw / 2, -bh / 2, bw, bh, 6);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = C.launcher;
-      ctx.fillRect(bw / 2 - 4 * s, -6 * s, 14 * s, 12 * s);
+      ctx.fillRect(bw / 2 - 4, -bh * 0.18, bh * 0.45, bh * 0.36);
       ctx.restore();
-      const hu = L.u + Math.cos(L.theta) * HANDLE_DIST;
-      const hv = L.v + Math.sin(L.theta) * HANDLE_DIST;
-      circle(hu, hv, 14 * s + 4, 'rgba(79, 163, 255, 0.3)', C.launcher, 2);
+      if (turning) {
+        // 旋回中: 発射台の周りに回転の輪を表示
+        const rr = Math.max(bw, bh) * 0.5 + 14;
+        ctx.strokeStyle = 'rgba(255, 245, 157, 0.75)';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.arc(lx, ly, rr, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
 
       // 「平行」マーク
       if (Math.abs(L.theta) <= 3 * DEG) {
@@ -697,7 +730,9 @@
   }
 
   // ---------- 入力 ----------
-  const drags = new Map(); // pointerId → { kind: 'move' | 'turn', offU, offV }
+  // pointerId → { kind: 'move', offU, offV } | { kind: 'turn', x, y }
+  // 発射台の上をドラッグ = 移動、それ以外の場所をドラッグ = 旋回(指を動かした量だけ回る)
+  const drags = new Map();
 
   function pointerWorld(ev) {
     const r = canvas.getBoundingClientRect();
@@ -709,14 +744,11 @@
     if (!(S.screen === 'play' || S.screen === 'practice')) return;
     const [u, v] = pointerWorld(ev);
     const L = S.launcher;
-    const hu = L.u + Math.cos(L.theta) * HANDLE_DIST;
-    const hv = L.v + Math.sin(L.theta) * HANDLE_DIST;
-    let kind = null;
-    if (Math.hypot(u - hu, v - hv) <= 48) kind = 'turn';
-    else if (Math.hypot(u - L.u, v - L.v) <= 64) kind = 'move';
-    else if (u < O.moveMaxU(S.f) + 20) { kind = 'move'; L.u = u; L.v = v; clampLauncher(); }
-    if (!kind) return;
-    drags.set(ev.pointerId, { kind, offU: L.u - u, offV: L.v - v });
+    if (Math.hypot(u - L.u, v - L.v) <= bodyGrab()) {
+      drags.set(ev.pointerId, { kind: 'move', offU: L.u - u, offV: L.v - v });
+    } else {
+      drags.set(ev.pointerId, { kind: 'turn', x: ev.clientX, y: ev.clientY });
+    }
     canvas.setPointerCapture(ev.pointerId);
     ev.preventDefault();
   });
@@ -724,13 +756,18 @@
   canvas.addEventListener('pointermove', (ev) => {
     const d = drags.get(ev.pointerId);
     if (!d) return;
-    const [u, v] = pointerWorld(ev);
     const L = S.launcher;
     if (d.kind === 'move') {
+      const [u, v] = pointerWorld(ev);
       L.u = u + d.offU;
       L.v = v + d.offV;
     } else {
-      L.theta = Math.atan2(v - L.v, Math.max(1, u - L.u));
+      // 光軸を横切る向きの指の動きで回る(横モードは上下、縦モードは左右)。
+      // 矢印キーと同じく、指を動かした向きにビームが振れる
+      const dx = ev.clientX - d.x, dy = ev.clientY - d.y;
+      d.x = ev.clientX; d.y = ev.clientY;
+      const amount = S.mode === 'landscape' ? dy : dx;
+      L.theta += amount * DRAG_TURN_PER_PX;
     }
     clampLauncher();
   });
@@ -750,6 +787,26 @@
   el.fire.addEventListener('pointerup', releaseFire);
   el.fire.addEventListener('pointercancel', releaseFire);
   el.fire.addEventListener('contextmenu', (ev) => ev.preventDefault());
+
+  // 旋回ボタン(↺ = 左回り = θを減らす、↻ = 右回り = θを増やす。縦横どちらでも見た目の回転方向は同じ)
+  for (const [btn, dir] of [[el.turnL, -1], [el.turnR, 1]]) {
+    btn.addEventListener('pointerdown', (ev) => {
+      if (!(S.screen === 'play' || S.screen === 'practice')) return;
+      S.turnInputs.set(ev.pointerId, { dir, t: 0 });
+      S.launcher.theta += dir * TURN_BTN_NUDGE;
+      clampLauncher();
+      btn.setPointerCapture(ev.pointerId);
+      btn.classList.add('pressed');
+      ev.preventDefault();
+    });
+    const release = (ev) => {
+      S.turnInputs.delete(ev.pointerId);
+      if (![...S.turnInputs.values()].some((t) => t.dir === dir)) btn.classList.remove('pressed');
+    };
+    btn.addEventListener('pointerup', release);
+    btn.addEventListener('pointercancel', release);
+    btn.addEventListener('contextmenu', (ev) => ev.preventDefault());
+  }
 
   // 平行に戻すボタン(タブレット用。キーボードでは ↑/↓)
   el.level.addEventListener('pointerdown', (ev) => {
@@ -773,7 +830,10 @@
     if (ev.code === 'Space') S.fireInputs.delete('key');
     keys.delete(ev.code);
   });
-  window.addEventListener('blur', () => { keys.clear(); S.fireInputs.clear(); drags.clear(); });
+  window.addEventListener('blur', () => {
+    keys.clear(); S.fireInputs.clear(); S.turnInputs.clear(); drags.clear();
+    el.turnL.classList.remove('pressed'); el.turnR.classList.remove('pressed');
+  });
 
   function toggleRotate() {
     S.lockedMode = S.mode === 'landscape' ? 'portrait' : 'landscape';
@@ -800,6 +860,8 @@
   $('btn-title').addEventListener('click', toTitle);
 
   window.addEventListener('resize', () => { applyMode(true); resize(); });
+  // 上部の情報表示が折り返して高さが変わったとき(スマホで「やめる」ボタンが出たときなど)も測り直す
+  if (window.ResizeObserver) new ResizeObserver(() => resize()).observe(el.stage);
 
   // ---------- ループ ----------
   let last = performance.now();

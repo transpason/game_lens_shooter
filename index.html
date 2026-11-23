@@ -30,8 +30,14 @@
 
   <main id="stage">
     <canvas id="game"></canvas>
-    <button id="btn-fire" aria-label="発射">発射</button>
-    <button id="btn-level" title="向きを光軸と平行に戻す(光軸に沿う向きの矢印キー)">平行に<br>戻す</button>
+    <div id="controls">
+      <button id="btn-level" title="向きを光軸と平行に戻す(光軸に沿う向きの矢印キー)">平行に<br>戻す</button>
+      <div class="turn-row">
+        <button id="btn-turn-l" class="turn-btn" aria-label="左回りに旋回" title="押している間、左回りに旋回">↺</button>
+        <button id="btn-turn-r" class="turn-btn" aria-label="右回りに旋回" title="押している間、右回りに旋回">↻</button>
+      </div>
+      <button id="btn-fire" aria-label="発射">発射</button>
+    </div>
 
     <section id="overlay-title" class="overlay">
       <div class="panel">
@@ -39,8 +45,8 @@
         <p>発射台を動かしたり回したりしながら、ビームを<strong>凸レンズに通して</strong>的に当てよう。<br>
           早く当てるほど高得点。制限時間は60秒。</p>
         <ul class="howto">
-          <li><b>動かす</b>:発射台をドラッグ(W/A/S/D)</li>
-          <li><b>回す</b>:発射台の先の丸いハンドルをドラッグ(横画面は ↑/↓、縦画面は ←/→)。「平行に戻す」ボタン(横画面は ←/→、縦画面は ↑/↓)で光軸と平行に戻る</li>
+          <li><b>動かす</b>:発射台をつかんでドラッグ(W/A/S/D)</li>
+          <li><b>回す</b>:発射台以外の場所をドラッグ(横画面は上下、縦画面は左右に動かした分だけ回る)、または ↺ ↻ ボタンを押している間(横画面は ↑/↓、縦画面は ←/→)。「平行に戻す」ボタン(横画面は ←/→、縦画面は ↑/↓)で光軸と平行に戻る</li>
           <li><b>発射</b>:「発射」ボタンを押している間(スペースキー)</li>
         </ul>
         <p class="hint">ヒント:光軸に平行な光・レンズの中心を通る光・焦点を通る光には決まった進み方があるよ。</p>
