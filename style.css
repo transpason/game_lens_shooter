@@ -31,14 +31,6 @@ body { display: flex; flex-direction: column; }
 .hud-item { display: flex; align-items: baseline; gap: 6px; }
 .hud-label { font-size: 13px; color: #9fb0cc; }
 .hud-value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 3.2em; }
-#hud-energy-box { align-items: center; }
-#energy-bar {
-  width: 140px; height: 14px;
-  border: 1px solid #5a6f96; border-radius: 7px;
-  overflow: hidden; background: #0f1724;
-}
-#energy-fill { height: 100%; width: 100%; background: #4fa3ff; transition: background 0.2s; }
-#energy-fill.overheat { background: #ff6b6b; }
 #f-slider { width: 160px; }
 .hud-buttons { margin-left: auto; display: flex; gap: 8px; }
 .hud-btn {
@@ -112,6 +104,8 @@ body { display: flex; flex-direction: column; }
 #btn-level:active { filter: brightness(1.3); }
 #btn-fire.pressed { transform: scale(0.94); filter: brightness(1.2); }
 #btn-fire.disabled { filter: grayscale(0.8) brightness(0.7); }
+#btn-fire small { display: block; font-size: 10px; font-weight: 400; line-height: 1.2; margin-top: 2px; opacity: 0.9; }
+#btn-fire.radar { box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.75), 0 4px 14px rgba(0, 0, 0, 0.45); }
 
 /* タイトル・結果 */
 .overlay {
@@ -166,6 +160,5 @@ button.big:hover { filter: brightness(1.15); }
 @media (max-width: 600px) {
   #hud { gap: 4px 12px; padding: 6px 8px; }
   .hud-value { font-size: 17px; }
-  #energy-bar { width: 90px; }
   #btn-fire { width: 84px; height: 84px; }
 }

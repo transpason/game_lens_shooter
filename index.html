@@ -13,16 +13,13 @@
     <div class="hud-item" id="hud-time-box"><span class="hud-label">残り時間</span><span id="hud-time" class="hud-value">60.0</span></div>
     <div class="hud-item" id="hud-score-box"><span class="hud-label">得点</span><span id="hud-score" class="hud-value">0</span></div>
     <div class="hud-item"><span class="hud-label">狙い時間</span><span id="hud-aim" class="hud-value">0.0</span></div>
-    <div class="hud-item" id="hud-energy-box">
-      <span class="hud-label">エネルギー</span>
-      <div id="energy-bar"><div id="energy-fill"></div></div>
-    </div>
     <div class="hud-item" id="hud-f-box" hidden>
       <label class="hud-label" for="f-slider">焦点距離</label>
       <input id="f-slider" type="range" min="200" max="480" step="10" value="320">
     </div>
     <div class="hud-buttons">
       <button id="btn-quit" class="hud-btn" hidden>やめる</button>
+      <button id="btn-radar" class="hud-btn" title="狙える範囲(レーダー)の表示のオン/オフ" hidden>レーダー:オン</button>
       <button id="btn-sound" class="hud-btn" title="効果音のオン/オフ">音:オン</button>
       <button id="btn-rotate" class="hud-btn" title="縦モード/横モードの切り替え(R キー)">↻ 縦/横</button>
     </div>
@@ -36,18 +33,19 @@
         <button id="btn-turn-l" class="turn-btn" aria-label="左回りに旋回" title="押している間、左回りに旋回">↺</button>
         <button id="btn-turn-r" class="turn-btn" aria-label="右回りに旋回" title="押している間、右回りに旋回">↻</button>
       </div>
-      <button id="btn-fire" aria-label="発射">発射</button>
+      <button id="btn-fire" aria-label="発射(長押しでレーダー)">発射<small>長押しで<br>レーダー</small></button>
     </div>
 
     <section id="overlay-title" class="overlay">
       <div class="panel">
         <h1>レンズ・シューター</h1>
-        <p>発射台を動かしたり回したりしながら、ビームを<strong>凸レンズに通して</strong>的に当てよう。<br>
+        <p>発射台の位置と向きを決めて、ビームを<strong>凸レンズに通して</strong>的に当てよう。<br>
           早く当てるほど高得点。制限時間は60秒。</p>
         <ul class="howto">
           <li><b>動かす</b>:発射台をつかんでドラッグ(W/A/S/D)</li>
           <li><b>回す</b>:発射台以外の場所をドラッグ(横画面は上下、縦画面は左右に動かした分だけ回る)、または ↺ ↻ ボタンを押している間(横画面は ↑/↓、縦画面は ←/→)。「平行に戻す」ボタン(横画面は ←/→、縦画面は ↑/↓)で光軸と平行に戻る</li>
-          <li><b>発射</b>:「発射」ボタンを押している間(スペースキー)</li>
+          <li><b>発射</b>:「発射」ボタン(スペースキー)を押して離すと1発。<b>長押し</b>すると、今の位置から狙える範囲(レーダー)が見えて、離すと撃つ。レーダーを見ている間も狙い時間は進むよ</li>
+          <li><b>練習モード</b>:押している間ビームが出続け、レーダーはいつでも表示できる</li>
         </ul>
         <p class="hint">ヒント:光軸に平行な光・レンズの中心を通る光・焦点を通る光には決まった進み方があるよ。</p>
         <div class="buttons">
@@ -70,6 +68,9 @@
           <tr><th>平行な光で命中</th><td id="res-parallel">0</td></tr>
           <tr><th>中心を通る光で命中</th><td id="res-center">0</td></tr>
           <tr><th>焦点を通る光で命中</th><td id="res-focus">0</td></tr>
+          <tr><th>焦点から発射で命中</th><td id="res-focus-shot">0</td></tr>
+          <tr><th>Fより内側から命中</th><td id="res-inside">0</td></tr>
+          <tr><th>一発命中</th><td id="res-first">0</td></tr>
         </table>
         <p class="hint">後ろの線は、命中したビームの道筋だよ。</p>
         <div class="buttons">

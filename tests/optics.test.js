@@ -99,3 +99,65 @@ test('狙いの点線は発射台から向きのまま画面端まで伸びる',
   const b = O.aimLine(200, 450, -Math.PI / 4); // 上向き45度 → 上端で切れる
   assert.ok(Math.abs(b.v2) < 1e-9 && Math.abs(b.u2 - 650) < 1e-9);
 });
+
+test('レーダー: 光軸上のFからは、レンズを通った光線がすべて光軸に平行になり、像はない', () => {
+  const reg = O.reachRegion(L - f, A, f);
+  assert.equal(reg.rays.length, 7);
+  for (const tr of reg.rays) {
+    assert.ok(tr.passedLens);
+    assert.ok(Math.abs(tr.m2) < 1e-9);
+  }
+  assert.equal(reg.image, null);
+});
+
+test('レーダー: Fより外側では光線がすべてレンズの公式どおりの実像の位置を通る', () => {
+  const a = 2 * f, y0 = -100; // 2F の位置、光軸より100上
+  const reg = O.reachRegion(L - a, A + y0, f);
+  const b = (a * f) / (a - f);
+  assert.ok(reg.image.real);
+  assert.ok(Math.abs(reg.image.u - (L + b)) < 1e-6);
+  assert.ok(Math.abs(reg.image.v - (A - (y0 * b) / a)) < 1e-6); // 倒立
+  for (const tr of reg.rays) assert.ok(Math.abs(vAt(tr.seg2, L + b) - reg.image.v) < 1e-6);
+});
+
+test('レーダー: Fより内側では光線が広がり、逆にたどると虚像(レンズの左側)で交わる', () => {
+  const a = 0.75 * f;
+  const reg = O.reachRegion(L - a, A, f);
+  const b = (a * f) / (a - f); // 負 = 虚像
+  assert.equal(reg.image.real, false);
+  assert.ok(Math.abs(reg.image.u - (L + b)) < 1e-6);
+  assert.ok(reg.edges[0].m2 < reg.edges[1].m2); // 上の光線は上へ、下の光線は下へ広がる
+});
+
+test('焦点の判定: 光軸上のFから半径30以内', () => {
+  assert.ok(O.isAtFocus(L - f, A, f));
+  assert.ok(O.isAtFocus(L - f + 20, A - 20, f));
+  assert.ok(!O.isAtFocus(L - f + 31, A, f));
+  assert.ok(!O.isAtFocus(L - f, A + 100, f)); // 焦点面上でも光軸から離れていれば対象外
+});
+
+test('得点: 焦点から発射+300は法則ボーナスと重ならず、一発命中+200は加算される', () => {
+  const common = { t: 0.5, dist: 20, r: 28 };
+  const atF = O.shotScore({ ...common, laws: ['parallel', 'center'], atFocus: true, firstShot: true });
+  assert.deepEqual(atF, { base: 1000, center: 0, law: 0, focus: 300, first: 200, total: 1500 });
+  const other = O.shotScore({ ...common, laws: ['focus'], atFocus: false, firstShot: false });
+  assert.equal(other.total, 1100);
+  const bullseye = O.shotScore({ ...common, dist: 5, laws: [], atFocus: false, firstShot: true });
+  assert.equal(bullseye.total, 1400);
+});
+
+test('レーダー: 発射台がどこにあっても、光線はすべてレンズを通り、像はレンズの公式どおりの位置になる', () => {
+  // 以前は端の光線がレンズの縁ちょうどを通り、計算誤差で「レンズの外」と判定されて像の位置がずれていた
+  for (let u0 = WORLD.MOVE_MIN_U; u0 <= O.moveMaxU(f); u0 += 7) {
+    for (let v0 = WORLD.MOVE_MIN_V; v0 <= WORLD.MOVE_MAX_V; v0 += 13) {
+      const reg = O.reachRegion(u0, v0, f);
+      for (const tr of reg.rays) assert.ok(tr.passedLens, `(${u0}, ${v0})`);
+      const a = L - u0, y0 = v0 - A;
+      if (Math.abs(a - f) < 1e-9) { assert.equal(reg.image, null); continue; }
+      const b = (a * f) / (a - f);
+      assert.equal(reg.image.real, b > 0, `(${u0}, ${v0})`);
+      assert.ok(Math.abs(reg.image.u - (L + b)) < 1e-4 * Math.max(1, Math.abs(b)), `(${u0}, ${v0})`);
+      assert.ok(Math.abs(reg.image.v - (A - (y0 * b) / a)) < 1e-4 * Math.max(1, Math.abs(b)), `(${u0}, ${v0})`);
+    }
+  }
+});

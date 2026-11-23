@@ -122,6 +122,64 @@
     return 100;
   }
 
+  const FOCUS_SNAP_R = 30; // この距離以内なら「光軸上のFにいる」とみなす(指を離すとFに吸い付く)
+
+  /** 発射台が光軸上の焦点F(レンズの左側)にいるとみなせるか */
+  function isAtFocus(u0, v0, f) {
+    return Math.hypot(u0 - (WORLD.LENS_U - f), v0 - WORLD.AXIS_V) <= FOCUS_SNAP_R;
+  }
+
+  /**
+   * レーダー: 発射台の位置から旋回だけで、レンズを通して狙える範囲を返す。
+   * 1点から出た光はレンズを通ったあと同じ1点(像)を通るので、範囲はレンズの上端・下端を通る2本の光線で決まる。
+   * @returns {{edges: [trace, trace], rays: trace[], image: {u, v, real} | null}}
+   *   edges: レンズの上端・下端を通る光線、rays: 中を通る光線(上から順、両端を含む)、
+   *   image: 像の位置(real=true なら実像、false なら虚像)。光線が平行になる(焦点面上)ときは null
+   */
+  function reachRegion(u0, v0, f, nRays) {
+    const n = Math.max(2, nRays || 7);
+    const L = WORLD.LENS_U;
+    const rays = [];
+    // 端の光線はレンズの縁をわずかに内側で通す(ちょうど縁だと計算誤差で「レンズの外」と判定され、曲がらない光線になるため)
+    const R = WORLD.LENS_R - 1e-6;
+    for (let i = 0; i < n; i++) {
+      const h = -R + (2 * R * i) / (n - 1);
+      const theta = Math.atan2(WORLD.AXIS_V + h - v0, L - u0);
+      if (Math.abs(theta) > WORLD.MAX_ANGLE) continue; // 向きの制限で撃てない光線は含めない
+      rays.push(traceBeam(u0, v0, theta, f));
+    }
+    const top = rays[0], bot = rays[rays.length - 1];
+    let image = null;
+    const dm = top.m2 - bot.m2;
+    if (rays.length >= 2 && Math.abs(dm) > 1e-9) {
+      const du = (bot.seg1.v2 - top.seg1.v2) / dm; // 2本の光線(またはその延長)が交わる位置
+      if (Math.abs(du) < 1e6) {
+        image = { u: L + du, v: top.seg1.v2 + top.m2 * du, real: du > 0 };
+      }
+    }
+    return { edges: [top, bot], rays, image };
+  }
+
+  const BONUS = {
+    center: 200,     // ど真ん中(的の半径の35%以内)
+    law: 100,        // 法則(平行光・中心通過・焦点通過)
+    focusShot: 300,  // 焦点から発射(光軸上のFから撃って命中)。法則ボーナスとは重ねず高いほうだけ
+    firstShot: 200,  // 一発命中(的が出てから最初の1発で命中)
+  };
+
+  /**
+   * 命中1回の得点を計算する。
+   * @param {{t:number, dist:number, r:number, laws:string[], atFocus:boolean, firstShot:boolean}} p
+   */
+  function shotScore(p) {
+    const base = baseScore(p.t);
+    const center = p.dist <= p.r * 0.35 ? BONUS.center : 0;
+    const focus = p.atFocus ? BONUS.focusShot : 0;
+    const law = !focus && p.laws.length ? BONUS.law : 0;
+    const first = p.firstShot ? BONUS.firstShot : 0;
+    return { base, center, law, focus, first, total: base + center + law + focus + first };
+  }
+
   /** 発射台の移動範囲内のどこかから、レンズを通して的に当てられるか */
   function isReachable(target, f) {
     const probe = { u: target.u, v: target.v, r: target.r * 0.8 };
@@ -177,6 +235,11 @@
     crossesWithoutLens,
     detectLaws,
     baseScore,
+    FOCUS_SNAP_R,
+    isAtFocus,
+    reachRegion,
+    BONUS,
+    shotScore,
     isReachable,
     spawnTarget,
   };

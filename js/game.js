@@ -11,10 +11,11 @@
   const DEG = Math.PI / 180;
 
   const ROUND_TIME = 60;          // 1回の制限時間(秒)
-  const ENERGY_DRAIN = 1 / 3;     // 満タンから約3秒で空
-  const ENERGY_FILL = 1 / 2;      // 約2秒で満タン
-  const OVERHEAT_RESUME = 0.5;    // 空になった後、この量まで戻ると再び撃てる
-  const GHOST_TIME = 1.0;         // ボタンを離した後に道筋が残る時間
+  const RADAR_DELAY = 0.3;        // 本番: 発射ボタンをこれ以上押し続けるとレーダーが出る(短く押せばすぐ撃つ)
+  const SHOT_COOLDOWN = 0.5;      // 本番: 1発撃ったあと次を撃てるまでの時間(旋回しながらの連打を防ぐ)
+  const SHOT_FLASH = 0.6;         // 本番: 撃ったビームが明るく光る時間(その後は次の1発まで薄く残る)
+  const RADAR_RAYS = 7;           // レーダーで描く光線の本数(両端を含む)
+  const GHOST_TIME = 1.0;         // 練習モード: ボタンを離した後に道筋が残る時間
   const ROTATE_PAUSE = 0.5;       // 縦横切り替え中はタイマーを止める
   const MSG_TIME = 1.6;
   const BODY_GRAB_PX = 34;        // 発射台本体をつかめる半径(画面上の最低値。これより外のドラッグは旋回)
@@ -44,9 +45,8 @@
     time: $('hud-time'), timeBox: $('hud-time-box'),
     score: $('hud-score'), scoreBox: $('hud-score-box'),
     aim: $('hud-aim'),
-    energyBox: $('hud-energy-box'), energyFill: $('energy-fill'),
     fBox: $('hud-f-box'), fSlider: $('f-slider'),
-    quit: $('btn-quit'), sound: $('btn-sound'), rotate: $('btn-rotate'),
+    quit: $('btn-quit'), sound: $('btn-sound'), rotate: $('btn-rotate'), radar: $('btn-radar'),
     fire: $('btn-fire'),
     turnL: $('btn-turn-l'), turnR: $('btn-turn-r'),
     level: $('btn-level'),
@@ -54,6 +54,7 @@
     titleHigh: $('title-high'),
     resScore: $('res-score'), resNew: $('res-new'), resHits: $('res-hits'), resBest: $('res-best'),
     resParallel: $('res-parallel'), resCenter: $('res-center'), resFocus: $('res-focus'),
+    resFocusShot: $('res-focus-shot'), resInside: $('res-inside'), resFirst: $('res-first'),
     fade: $('rotate-fade'),
   };
 
@@ -78,10 +79,20 @@
     target: null,
     fireInputs: new Set(),
     turnInputs: new Map(),     // pointerId → { dir: -1 | 1, t: 押している時間 }
-    firing: false,
+    firing: false,             // 練習モード: 押している間ビームを出し続ける
     trace: null,
-    energy: 1,
-    overheat: false,
+    holdTime: 0,               // 本番: 発射ボタンを押し続けている時間
+    shotQueued: false,         // 本番: 発射ボタンが離された(次のフレームで1発撃つ)
+    cooldown: 0,
+    shot: null,                // 本番: 最後に撃った1発 { trace, from, t }
+    shotsThisTarget: 0,
+    radarOn: true,             // 練習モード: レーダーの常時表示のオン/オフ
+    radarVisible: false,
+    keyMoving: false,
+    focusNoticePrev: false,
+    focusNoticeShown: false,
+    insideNoticeShown: false,
+    stats: { focusShot: 0, inside: 0, first: 0 },
     timeLeft: ROUND_TIME,
     aimTime: 0,
     score: 0,
@@ -127,6 +138,9 @@
     hit() { this.beep(660, 0.12, 'triangle', 0.2); setTimeout(() => this.beep(990, 0.18, 'triangle', 0.2), 90); },
     bonus() { this.beep(1320, 0.25, 'sine', 0.12); },
     empty() { this.beep(160, 0.25, 'square', 0.08, 90); },
+    shot() { this.beep(900, 0.12, 'sawtooth', 0.06, 300); },
+    snap() { this.beep(1800, 0.04, 'square', 0.07); },
+    focus() { this.beep(784, 0.15, 'sine', 0.13); setTimeout(() => this.beep(1175, 0.3, 'sine', 0.13), 120); },
     end() { this.beep(523, 0.2, 'triangle', 0.18); setTimeout(() => this.beep(392, 0.4, 'triangle', 0.18), 180); },
     setHum(on) {
       if (!this.ctx) return;
@@ -239,6 +253,17 @@
   function newTarget() {
     S.target = O.spawnTarget(S.f, S.target, null, nearButtons);
     S.aimTime = 0;
+    S.shotsThisTarget = 0;
+  }
+
+  // 光軸上の焦点Fの近くで手を離したら、発射台をFにぴったり吸い付ける(「カチッ」と鳴る)
+  function trySnap() {
+    const L = S.launcher;
+    const fu = W.LENS_U - S.f;
+    if (!O.isAtFocus(L.u, L.v, S.f) || (L.u === fu && L.v === W.AXIS_V)) return;
+    L.u = fu;
+    L.v = W.AXIS_V;
+    Sound.snap();
   }
 
   // 画面サイズや縦横が変わって的がボタンに重なったら、狙い時間はそのままで的だけ置き直す
@@ -254,8 +279,17 @@
     S.f = practice ? Number(el.fSlider.value) : W.F_DEFAULT;
     S.launcher = { u: 250, v: 300, theta: 0 };
     S.target = null;
-    S.energy = 1;
-    S.overheat = false;
+    S.firing = false;
+    S.holdTime = 0;
+    S.shotQueued = false;
+    S.cooldown = 0;
+    S.shot = null;
+    S.radarOn = true;
+    S.radarVisible = false;
+    S.focusNoticePrev = false;
+    S.focusNoticeShown = false;
+    S.insideNoticeShown = false;
+    S.stats = { focusShot: 0, inside: 0, first: 0 };
     S.timeLeft = ROUND_TIME;
     S.score = 0;
     S.hits = 0;
@@ -266,7 +300,7 @@
     S.popups = [];
     S.bursts = [];
     S.message = practice
-      ? { text: '練習モード:焦点距離を変えて、光の曲がり方の違いを観察しよう', t: 3 }
+      ? { text: '練習モード:レーダーと焦点距離で、光の進み方を観察しよう', t: 3 }
       : null;
     newTarget();
     el.title.hidden = true;
@@ -279,6 +313,8 @@
     S.fireInputs.clear();
     S.turnInputs.clear();
     S.firing = false;
+    S.shotQueued = false;
+    S.radarVisible = false;
     Sound.setHum(false);
     Sound.end();
     const isNew = S.score > S.high;
@@ -290,6 +326,9 @@
     el.resParallel.textContent = S.laws.parallel;
     el.resCenter.textContent = S.laws.center;
     el.resFocus.textContent = S.laws.focus;
+    el.resFocusShot.textContent = S.stats.focusShot;
+    el.resInside.textContent = S.stats.inside;
+    el.resFirst.textContent = S.stats.first;
     el.result.hidden = false;
     updateHudVisibility();
   }
@@ -298,6 +337,9 @@
     S.screen = 'title';
     S.fireInputs.clear();
     S.turnInputs.clear();
+    S.firing = false;
+    S.shotQueued = false;
+    S.radarVisible = false;
     Sound.setHum(false);
     el.result.hidden = true;
     el.title.hidden = false;
@@ -308,8 +350,9 @@
   function updateHudVisibility() {
     const practice = S.screen === 'practice';
     el.timeBox.hidden = practice;
-    el.energyBox.hidden = practice;
     el.fBox.hidden = !practice;
+    el.radar.hidden = !practice;
+    el.fire.innerHTML = practice ? '発射' : '発射<small>長押しで<br>レーダー</small>';
     el.quit.hidden = !(S.screen === 'play' || practice);
     el.scoreBox.querySelector('.hud-label').textContent = practice ? '命中数' : '得点';
   }
@@ -318,27 +361,55 @@
     const L = S.launcher;
     const t = S.aimTime;
     const laws = O.detectLaws(L.u, L.v, L.theta, S.f, trace);
-    const centerBonus = dist <= S.target.r * 0.35 ? 200 : 0;
-    const lawBonus = laws.length ? 100 : 0;
-    const pts = O.baseScore(t) + centerBonus + lawBonus;
+    const atFocus = O.isAtFocus(L.u, L.v, S.f);
+    const inside = !atFocus && L.u > W.LENS_U - S.f + 15; // Fより内側(レンズ寄り)から
+    let msg = null;
 
     S.hits += 1;
     if (S.screen === 'play') {
-      S.score += pts;
+      const sc = O.shotScore({ t, dist, r: S.target.r, laws, atFocus, firstShot: S.shotsThisTarget === 1 });
+      S.score += sc.total;
       S.best = Math.min(S.best, t);
       for (const k of laws) S.laws[k] += 1;
+      if (atFocus) S.stats.focusShot += 1;
+      if (inside) S.stats.inside += 1;
+      if (sc.first) S.stats.first += 1;
       S.hitPaths.push({ seg1: { ...trace.seg1 }, seg2: { ...trace.seg2 } });
-      let label = `+${pts}`;
-      if (centerBonus) label += '  ど真ん中!';
+      let label = `+${sc.total}`;
+      if (sc.first) label += '  一発命中!';
+      if (sc.center) label += '  ど真ん中!';
       S.popups.push({ u: S.target.u, v: S.target.v, text: label, t: 1.2 });
+      if (atFocus) msg = `焦点から発射!光が光軸に平行に進んだ(+${O.BONUS.focusShot})`;
+      else if (laws.length) msg = LAW_TEXT[laws[0]] + `(法則ボーナス +${O.BONUS.law})`;
+    } else {
+      if (atFocus) msg = '焦点から出た光は、レンズを通ると光軸に平行に進む!';
+      else if (laws.length) msg = LAW_TEXT[laws[0]];
+    }
+    if (inside && !S.insideNoticeShown) {
+      msg = 'Fより内側から命中!レンズを通った光が広がって届いたよ';
+      S.insideNoticeShown = true;
     }
     S.bursts.push({ u: S.target.u, v: S.target.v, t: 0.6 });
-    S.message = laws.length
-      ? { text: LAW_TEXT[laws[0]] + (S.screen === 'play' ? '(法則ボーナス +100)' : ''), t: MSG_TIME }
-      : { text: `命中!(${t.toFixed(1)} 秒)`, t: 1.0 };
+    S.message = msg ? { text: msg, t: MSG_TIME } : { text: `命中!(${t.toFixed(1)} 秒)`, t: 1.0 };
     Sound.hit();
-    if (lawBonus) Sound.bonus();
+    if (atFocus || laws.length) Sound.bonus();
     newTarget();
+  }
+
+  // 本番: 発射ボタンを離した瞬間に1発撃つ
+  function fireShot() {
+    if (S.cooldown > 0) { Sound.empty(); return; }
+    const L = S.launcher;
+    const trace = O.traceBeam(L.u, L.v, L.theta, S.f);
+    S.cooldown = SHOT_COOLDOWN;
+    S.shot = { trace, from: { u: L.u, v: L.v, theta: L.theta }, t: SHOT_FLASH };
+    S.shotsThisTarget += 1;
+    Sound.shot();
+    const d = O.hitTest(trace, S.target);
+    if (d !== null) onHit(trace, d);
+    else if (O.crossesWithoutLens(trace, S.target)) {
+      S.message = { text: 'レンズの外を通った光は無効。レンズを通して当てよう', t: 1.6 };
+    }
   }
 
   // ---------- 更新 ----------
@@ -352,6 +423,7 @@
     S.bursts = S.bursts.filter((b) => (b.t -= dt) > 0);
     if (S.message && (S.message.t -= dt) <= 0) S.message = null;
     if (S.ghost && (S.ghost.t -= dt) <= 0) S.ghost = null;
+    if (S.shot) S.shot.t = Math.max(0, S.shot.t - dt);
     S.lensHintCooldown = Math.max(0, S.lensHintCooldown - dt);
 
     if (!active) return;
@@ -369,6 +441,7 @@
       S.launcher.u += (du / n) * MOVE_SPEED * dt;
       S.launcher.v += (dv / n) * MOVE_SPEED * dt;
     }
+    const keyMoving = !!(kx || ky);
     // 矢印キー: 光軸を横切る向きのキーで旋回、光軸に沿う向きのキーで平行に戻す。
     // 横モード(光軸が左右)は ↑/↓ で旋回・←/→ で平行、縦モード(光軸が上下)は ←/→ で旋回・↑/↓ で平行。
     // 旋回はキーの矢印の向きにビームが振れる(横の ↑ と縦の ← はどちらも θ を減らす)
@@ -386,31 +459,29 @@
       S.launcher.theta += ti.dir * speed * dt;
     }
     clampLauncher();
+    if (S.keyMoving && !keyMoving) trySnap(); // キー移動をやめたときも焦点に吸い付く
+    S.keyMoving = keyMoving;
 
-    // 発射とエネルギーゲージ
-    const want = S.fireInputs.size > 0;
+    // 発射
+    const held = S.fireInputs.size > 0;
     const wasFiring = S.firing;
     if (S.screen === 'play') {
-      if (S.overheat) {
-        S.energy = Math.min(1, S.energy + ENERGY_FILL * dt);
-        if (S.energy >= OVERHEAT_RESUME) S.overheat = false;
-        S.firing = false;
-      } else if (want) {
-        S.energy -= ENERGY_DRAIN * dt;
-        S.firing = true;
-        if (S.energy <= 0) {
-          S.energy = 0;
-          S.overheat = true;
-          S.firing = false;
-          Sound.empty();
-          S.message = { text: 'エネルギー切れ!少し待つと回復するよ。よく狙ってから撃とう', t: 1.6 };
-        }
-      } else {
-        S.energy = Math.min(1, S.energy + ENERGY_FILL * dt);
-        S.firing = false;
+      // 単発: 短く押して離すとすぐ撃つ。長押し中はレーダーが出て、離すと撃つ
+      S.cooldown = Math.max(0, S.cooldown - dt);
+      if (held) S.holdTime += dt;
+      S.radarVisible = held && S.holdTime >= RADAR_DELAY;
+      S.firing = false;
+      if (S.shotQueued) {
+        S.shotQueued = false;
+        S.holdTime = 0;
+        S.radarVisible = false;
+        fireShot();
       }
     } else {
-      S.firing = want;
+      // 練習モード: 押している間ビームを出し続ける。レーダーは常時表示(ボタンで切り替え)
+      S.firing = held;
+      S.shotQueued = false;
+      S.radarVisible = S.radarOn;
     }
 
     S.trace = S.firing ? O.traceBeam(S.launcher.u, S.launcher.v, S.launcher.theta, S.f) : null;
@@ -419,6 +490,17 @@
       S.ghost = { trace: last, t: GHOST_TIME };
     }
     Sound.setHum(S.firing);
+
+    // レーダー表示中に光軸上のFへ入ったら知らせる(文は1ラウンド1回、音は毎回)
+    const atF = S.radarVisible && O.isAtFocus(S.launcher.u, S.launcher.v, S.f);
+    if (atF && !S.focusNoticePrev) {
+      Sound.focus();
+      if (!S.focusNoticeShown) {
+        S.message = { text: '光が平行になった!ここが焦点F', t: 2.2 };
+        S.focusNoticeShown = true;
+      }
+    }
+    S.focusNoticePrev = atF;
 
     // タイマー
     S.aimTime += dt;
@@ -458,6 +540,10 @@
     glow: '#fff59d',
     path: 'rgba(255, 211, 107, 0.55)',
     straight: 'rgba(232, 238, 247, 0.6)',
+    radarFill: 'rgba(56, 189, 248, 0.16)',
+    radarRay: 'rgba(125, 211, 252, 0.55)',
+    radarIn: 'rgba(125, 211, 252, 0.25)',
+    image: '#fde68a',
   };
 
   function line(u1, v1, u2, v2) {
@@ -509,6 +595,77 @@
     for (const s of segs) line(s.u1, s.v1, s.u2, s.v2);
   }
 
+  // 世界座標の点列で多角形の道を作る
+  function polyPath(pts) {
+    ctx.beginPath();
+    pts.forEach(([u, v], i) => {
+      const [x, y] = toScreen(u, v);
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    });
+    ctx.closePath();
+  }
+
+  // 世界座標の長方形で描画範囲を切り取る
+  function clipWorldRect(u0, v0, u1, v1) {
+    const [ax, ay] = toScreen(u0, v0);
+    const [bx, by] = toScreen(u1, v1);
+    ctx.beginPath();
+    ctx.rect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay));
+    ctx.clip();
+  }
+
+  // レーダー: 今の位置から旋回だけでレンズを通して狙える範囲。今の向きのビームそのものは描かない
+  function drawRadar() {
+    const { s } = view;
+    const L = S.launcher;
+    const reg = O.reachRegion(L.u, L.v, S.f, RADAR_RAYS);
+    const lensV = (tr) => tr.seg1.v2;
+    // レンズより右の光線を画面の外まで延ばした点(描画は遊ぶ範囲で切り取る)
+    const far = (tr) => [W.W + 400, lensV(tr) + tr.m2 * (W.W + 400 - W.LENS_U)];
+    const [top, bot] = reg.edges;
+
+    // 発射台からレンズの上端・下端まで(入ってくる光の範囲)
+    ctx.strokeStyle = C.radarIn;
+    ctx.lineWidth = Math.max(1, 1.5 * s);
+    for (const tr of [top, bot]) line(L.u, L.v, W.LENS_U, lensV(tr));
+
+    ctx.save();
+    clipWorldRect(W.LENS_U, 0, W.W, W.H);
+    polyPath([[W.LENS_U, lensV(top)], far(top), far(bot), [W.LENS_U, lensV(bot)]]);
+    ctx.fillStyle = C.radarFill;
+    ctx.fill();
+    ctx.strokeStyle = C.radarRay;
+    ctx.lineWidth = Math.max(1, 1.6 * s);
+    for (const tr of reg.rays) {
+      const [fu, fv] = far(tr);
+      line(W.LENS_U, lensV(tr), fu, fv);
+    }
+    ctx.restore();
+
+    // 像の位置: 実像は輪、虚像は光線を逆にたどった点線と点線の輪
+    const im = reg.image;
+    if (!im) return;
+    const inField = im.u >= 0 && im.u <= W.W && im.v >= 0 && im.v <= W.H;
+    ctx.save();
+    clipWorldRect(0, 0, W.W, W.H);
+    if (!im.real) {
+      ctx.strokeStyle = C.image;
+      ctx.globalAlpha = 0.6;
+      ctx.lineWidth = Math.max(1, 1.4 * s);
+      ctx.setLineDash([4, 6]);
+      for (const tr of [top, bot]) line(W.LENS_U, lensV(tr), im.u, im.v);
+      ctx.globalAlpha = 1;
+    }
+    if (inField) {
+      ctx.setLineDash(im.real ? [] : [4, 4]);
+      circle(im.u, im.v, 10 * s + 4, null, C.image, 2.5);
+      ctx.setLineDash([]);
+      text(im.real ? '実像' : '虚像', im.u, im.v, { color: C.image, size: 22, weight: 700, dy: -(22 * s + 10) });
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   function render() {
     const { dpr, s } = view;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -545,16 +702,19 @@
       ? { color: C.quiet, size: 22, align: 'right', dy: -18 * s - 6 }
       : { color: C.quiet, size: 22, align: 'left', dx: 18 * s + 6 });
 
-    // ビームが通った特別な点(光らせて気づかせる)
-    const tr = S.trace;
+    // ビームが通った特別な点(光らせて気づかせる)。本番は撃った1発が光っている間だけ
     const L = S.launcher;
-    const laws = tr ? O.detectLaws(L.u, L.v, L.theta, S.f, tr) : [];
+    const flash = S.shot && S.shot.t > 0 ? S.shot : null;
+    const tr = S.trace || (flash && flash.trace);
+    const from = S.trace ? L : flash ? flash.from : L;
+    const laws = tr ? O.detectLaws(from.u, from.v, from.theta, S.f, tr) : [];
+    const atFocus = (S.screen === 'play' || S.screen === 'practice') && O.isAtFocus(L.u, L.v, S.f);
     const backFocusLit = tr && tr.passedLens && O.distPointSeg(W.LENS_U + S.f, W.AXIS_V, tr.seg2) <= 14;
 
     // 焦点 F と 2F
     const pts = [
       { u: W.LENS_U - 2 * S.f, label: '2F', main: false, lit: false },
-      { u: W.LENS_U - S.f, label: 'F', main: true, lit: laws.includes('focus') },
+      { u: W.LENS_U - S.f, label: 'F', main: true, lit: laws.includes('focus') || atFocus },
       { u: W.LENS_U + S.f, label: 'F', main: true, lit: backFocusLit },
       { u: W.LENS_U + 2 * S.f, label: '2F', main: false, lit: false },
     ];
@@ -616,7 +776,15 @@
     }
 
     if (active) {
-      // 直前の道筋(薄く残る)
+      if (S.radarVisible) drawRadar();
+      // 本番: 撃った1発。撃った直後は明るく、その後は次の1発まで薄く残る
+      if (S.shot) {
+        const k = S.shot.t / SHOT_FLASH;
+        ctx.globalAlpha = 0.3 + 0.7 * k;
+        drawBeam(S.shot.trace, C.beam, k > 0 ? C.beamGlow : null, k > 0 ? 3 : 2.5);
+        ctx.globalAlpha = 1;
+      }
+      // 練習モード: 直前の道筋(薄く残る)
       if (S.ghost && !S.firing) {
         ctx.globalAlpha = Math.max(0, S.ghost.t / GHOST_TIME);
         drawBeam(S.ghost.trace, C.ghost, null, 2.5);
@@ -721,10 +889,10 @@
     el.time.textContent = S.timeLeft.toFixed(1);
     el.score.textContent = S.screen === 'practice' ? String(S.hits) : S.score.toLocaleString();
     el.aim.textContent = S.aimTime.toFixed(1);
-    el.energyFill.style.width = `${Math.round(S.energy * 100)}%`;
-    el.energyFill.classList.toggle('overheat', S.overheat);
     el.fire.classList.toggle('pressed', S.fireInputs.size > 0);
-    el.fire.classList.toggle('disabled', S.overheat);
+    el.fire.classList.toggle('disabled', S.screen === 'play' && S.cooldown > 0);
+    el.fire.classList.toggle('radar', S.screen === 'play' && S.radarVisible);
+    el.radar.textContent = S.radarOn ? 'レーダー:オン' : 'レーダー:オフ';
     el.sound.textContent = S.sound ? '音:オン' : '音:オフ';
     el.rotate.textContent = S.lockedMode ? `↻ 縦/横(${S.mode === 'landscape' ? '横' : '縦'}で固定)` : '↻ 縦/横';
   }
@@ -772,18 +940,32 @@
     clampLauncher();
   });
 
-  const endDrag = (ev) => drags.delete(ev.pointerId);
+  const endDrag = (ev) => {
+    const d = drags.get(ev.pointerId);
+    drags.delete(ev.pointerId);
+    if (d && d.kind === 'move') trySnap();
+  };
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
 
+  // 発射の入力(ボタン・スペースキー共通)。本番は全部離した瞬間に1発撃つ
+  function pressFire(id) {
+    Sound.ensure();
+    if (S.fireInputs.size === 0) S.holdTime = 0;
+    S.fireInputs.add(id);
+  }
+  function releaseFireInput(id) {
+    if (!S.fireInputs.delete(id)) return;
+    if (S.fireInputs.size === 0 && S.screen === 'play') S.shotQueued = true;
+  }
+
   // 発射ボタン(マルチタッチ: 片手で発射台、もう片方で発射)
   el.fire.addEventListener('pointerdown', (ev) => {
-    Sound.ensure();
-    S.fireInputs.add('p' + ev.pointerId);
+    pressFire('p' + ev.pointerId);
     el.fire.setPointerCapture(ev.pointerId);
     ev.preventDefault();
   });
-  const releaseFire = (ev) => S.fireInputs.delete('p' + ev.pointerId);
+  const releaseFire = (ev) => releaseFireInput('p' + ev.pointerId);
   el.fire.addEventListener('pointerup', releaseFire);
   el.fire.addEventListener('pointercancel', releaseFire);
   el.fire.addEventListener('contextmenu', (ev) => ev.preventDefault());
@@ -816,8 +998,7 @@
 
   window.addEventListener('keydown', (ev) => {
     if (ev.code === 'Space') {
-      Sound.ensure();
-      S.fireInputs.add('key');
+      pressFire('key');
       ev.preventDefault();
       return;
     }
@@ -827,11 +1008,13 @@
     keys.add(ev.code);
   });
   window.addEventListener('keyup', (ev) => {
-    if (ev.code === 'Space') S.fireInputs.delete('key');
+    if (ev.code === 'Space') releaseFireInput('key');
     keys.delete(ev.code);
   });
   window.addEventListener('blur', () => {
+    // 画面から離れたら撃たずに入力を取り消す
     keys.clear(); S.fireInputs.clear(); S.turnInputs.clear(); drags.clear();
+    S.shotQueued = false; S.holdTime = 0;
     el.turnL.classList.remove('pressed'); el.turnR.classList.remove('pressed');
   });
 
@@ -848,6 +1031,7 @@
     ev.currentTarget.blur();
   });
   el.quit.addEventListener('click', (ev) => { toTitle(); ev.currentTarget.blur(); });
+  el.radar.addEventListener('click', (ev) => { S.radarOn = !S.radarOn; ev.currentTarget.blur(); });
   el.fSlider.addEventListener('input', () => {
     S.f = Number(el.fSlider.value);
     clampLauncher(); // 焦点距離が長くなると近づける範囲が狭まる
