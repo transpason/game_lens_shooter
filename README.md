@@ -5,6 +5,8 @@
 
 ## 遊び方
 
+**ブラウザで遊ぶ:** https://transpason.github.io/game_lens_shooter/ (設計書: https://transpason.github.io/game_lens_shooter/docs/design.html)
+
 `index.html` をブラウザで開くだけで動く(サーバー・インストール不要、外部ライブラリなし)。
 
 | 操作 | タブレット | PC |
